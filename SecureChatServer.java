@@ -137,14 +137,15 @@ public class SecureChatServer
 						for (int i = 0; i < data.length; i++) 
 						{
 							data[i] = input[i];
-							logger.print(new String(data, "ISO-8859-1"));
+							logger.print(new String(data, "ISO-8859-1")); //logfile currently outputs encrypted json garbage
 						}
 						
 						for (User u : users) 
 						{
-	                        u.send(data, type);
-	                    }
-						logger.println();
+	                       				u.send(data, type);
+	                 			}
+						
+						logger.println(); 
 					}
 					catch (Exception i)
 					{
