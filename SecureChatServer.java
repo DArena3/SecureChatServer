@@ -4,16 +4,12 @@ import java.util.Date;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.FileNotFoundException;
-import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintWriter;
 
 import java.net.ServerSocket;
 import java.net.Socket;
-
-import org.apache.commons.io.*;
 
 /**
  * An enumerated type where each member corresponds to the ordinal of the first byte of an incoming message.
@@ -33,7 +29,7 @@ enum TypeOfData
  */
 public class SecureChatServer 
 {
-	private static ArrayList<User> users;
+	private static ArrayList<User> users = new ArrayList<User>();
 	private static int port;
 	private static String directory;
 	private static File logFile;
@@ -48,6 +44,13 @@ public class SecureChatServer
 	 */
 	public static void main(String args[]) throws Exception
 	{	
+		/**
+		 * Temporary arguments so the program does not need to be run from the command line
+		 */
+		args = new String[2];
+		args[0] = "6799";
+		args[1] = "C:\\Users\\David\\Documents";
+		
 		boolean argsInit = false;
 		try
 		{
@@ -65,7 +68,6 @@ public class SecureChatServer
 			port = Integer.parseInt(args[0]);
 			directory = args[1];
 			
-			//log file is currently unused
 			logFile = new File(directory + "/logs" + port + ".txt");
 			logger = null;
 			try
@@ -102,8 +104,9 @@ public class SecureChatServer
 	public static class User extends Thread
 	{
 		private Socket socket;
-		private byte[] message;
-		private TypeOfData last;
+		private byte[] data;
+		private byte[] input;
+		private TypeOfData type;
 		
 		/**
 		 * Constructs a handler with the given client socket.
@@ -126,14 +129,22 @@ public class SecureChatServer
 				{
 					try
 					{
-						message = IOUtils.toByteArray(socket.getInputStream());
-						if (message.length != 0)
+						type = TypeOfData.values()[socket.getInputStream().read()];
+						input = new byte[1000];
+						data = new byte[socket.getInputStream().read(input)];
+					
+						logger.print(new Date() + " ");
+						for (int i = 0; i < data.length; i++) 
 						{
-							last = removeFirst(message);
-							for (User u : users) {
-		                        u.send(message, last);
-		                    }
+							data[i] = input[i];
+							logger.print(new String(data, "ISO-8859-1"));
 						}
+						
+						for (User u : users) 
+						{
+	                        u.send(data, type);
+	                    }
+						logger.println();
 					}
 					catch (Exception i)
 					{
@@ -166,47 +177,12 @@ public class SecureChatServer
 		 */
 		public void send(byte[] data, TypeOfData type) throws Exception 
 		{
-	        byte[] toSend = new byte[1 + data.length];
-	        toSend[0] = (byte) type.ordinal();
-	        for (int i = 1; i < toSend.length; ++i) {
-	            toSend[i] = data[i - 1];
-	        }
-	        this.socket.getOutputStream().write(toSend);
+	        if (data.length > 1000)
+	        	throw new Exception("Error: message was too long to be sent");
+
+	        this.socket.getOutputStream().write(type.ordinal());
+	        this.socket.getOutputStream().write(data);
 	        this.socket.getOutputStream().flush();
-		}
-		
-		/**
-		 * Removes and returns the first byte of an incoming message as a TypeOfData. The first element of the byte array
-		 * is truncated, leaving only the data of the message.
-		 * 
-		 * @param message
-		 * @return The type of data representing the message.
-		 * @throws IOException
-		 */
-		public TypeOfData removeFirst(byte[] message) throws IOException
-		{
-			byte[] temp = new byte[message.length - 1];
-			TypeOfData type;
-			
-			switch (message[0])
-			{
-				case 0x00: type = TypeOfData.MESSAGE; break;
-				case 0x01: type = TypeOfData.DH_PUB_KEY; break;
-				case 0x02: type = TypeOfData.NUM_OF_KEYS; break;
-				case 0x03: type = TypeOfData.CHATROOM; break;
-				case 0x04: type = TypeOfData.NICKNAME; break;
-				case 0x05: type = TypeOfData.DISCONNECT_MESSAGE; break;
-				case 0x06: type = TypeOfData.CONNECT_MESSAGE; break;
-				default: throw new IOException("Error: Malformed message received");
-			}
-			
-			for (int i = 0; i < message.length - 1; i++)
-			{
-				temp[i] = message[i + 1];
-			}
-			
-			message = temp;
-			return type;
 		}
 	}
 }
