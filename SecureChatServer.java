@@ -10,6 +10,7 @@ import java.io.PrintWriter;
 
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 
 /**
  * An enumerated type where each member corresponds to the ordinal of the first byte of an incoming message.
@@ -18,12 +19,12 @@ import java.net.Socket;
  */
 enum TypeOfData
 {
-	MESSAGE, DH_PUB_KEY, CHATROOM, NICKNAME, DISCONNECT_MESSAGE, CONNECT_MESSAGE
+	MESSAGE, DH_PUB_KEY, NICKNAME, SERVER_MESSAGE
 }
 
 /**
  * The first revision of the SecureChatServer implementation. It is very incomplete and missing many features that will be included in the final
- * product, most notably the encrytion and logging. This is meant as a test or proof of concept.
+ * product, most notably the encrytion and  This is meant as a test or proof of concept.
  * 
  * @author David Arena
  */
@@ -48,8 +49,8 @@ public class SecureChatServer
 		 * Temporary arguments so the program does not need to be run from the command line
 		 */
 		args = new String[2];
-		args[0] = "6799";
-		args[1] = "C:\\Users\\David\\Documents";
+		args[0] = "6800";
+		args[1] = "C:\\Users\\David\\Documents"; //please change this in your implementation
 		
 		boolean argsInit = false;
 		try
@@ -104,6 +105,7 @@ public class SecureChatServer
 	public static class User extends Thread
 	{
 		private Socket socket;
+		private String nickname;
 		private byte[] data;
 		private byte[] input;
 		private TypeOfData type;
@@ -124,39 +126,44 @@ public class SecureChatServer
 			try
 			{
 				users.add(this);
-				
+				logger.println("(nickname) joined the server.");
 				while (true)
 				{
 					try
 					{
 						type = TypeOfData.values()[socket.getInputStream().read()];
+						if (type.ordinal() == -1)
+							throw new SocketException("Socket has died. RIP");
 						input = new byte[1000];
 						data = new byte[socket.getInputStream().read(input)];
+						
 					
 						logger.print(new Date() + " ");
 						for (int i = 0; i < data.length; i++) 
 						{
+							if (input[i] == -1)
+								throw new SocketException("Socket has died. RIP");
 							data[i] = input[i];
-							logger.print(new String(data, "ISO-8859-1")); //logfile currently outputs encrypted json garbage
 						}
 						
+						System.out.print("(user) sent a message.");
 						for (User u : users) 
 						{
-	                       				u.send(data, type);
-	                 			}
+							u.send(data, type);
+						}
 						
 						logger.println(); 
 					}
 					catch (Exception i)
 					{
-						System.out.println(i.getMessage());
+						break;
 					}	
 				}
 			}
 			finally
 			{
 				users.remove(this);
-				
+				logger.println("nickname disconnected from the server.");
 				try
 				{
 					socket.close();
@@ -179,7 +186,7 @@ public class SecureChatServer
 		public void send(byte[] data, TypeOfData type) throws Exception 
 		{
 	        if (data.length > 1000)
-	        	throw new Exception("Error: message was too long to be sent");
+	        	throw new Exception("Error: message was too long to be sent.");
 
 	        this.socket.getOutputStream().write(type.ordinal());
 	        this.socket.getOutputStream().write(data);
