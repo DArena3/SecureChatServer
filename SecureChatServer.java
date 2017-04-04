@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.PrintWriter;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.io.IOException;
 import java.io.PrintWriter;
 
@@ -12,13 +13,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 
+//import
 /**
  * An enumerated type where each member corresponds to the ordinal of the first byte of an incoming message.
  * These represent the different types of communication the user has with the server (e.g. sending a regular message, requesting public keys,
  * indicating that the user is going to disconnect, etc.)
  */
-enum TypeOfData
-{
+enum TypeOfData {
 	MESSAGE, DH_PUB_KEY, NICKNAME, SERVER_MESSAGE
 }
 
@@ -28,8 +29,7 @@ enum TypeOfData
  * 
  * @author David Arena
  */
-public class SecureChatServer 
-{
+public class SecureChatServer extends Thread {
 	private static ArrayList<User> users = new ArrayList<User>();
 	private static int port;
 	private static String directory;
@@ -43,8 +43,7 @@ public class SecureChatServer
 	 * @param args
 	 * @throws Exception
 	 */
-	public static void main(String args[]) throws Exception
-	{	
+	public static void main(String args[]) throws Exception {	
 		/**
 		 * Temporary arguments so the program does not need to be run from the command line
 		 */
@@ -53,47 +52,39 @@ public class SecureChatServer
 		args[1] = "C:\\Users\\David\\Documents"; //please change this in your implementation
 		
 		boolean argsInit = false;
-		try
-		{
+		try {
 			if (args.length != 2)
-				throw new IllegalArgumentException("Error: The IP address and chat log directory must be specified in the command line.");
+				throw new IllegalArgumentException(new Date() + " " + "<ERROR>: The IP address and chat log directory must be specified in the command line.");
 			else argsInit = true;
 		}
-		catch (IllegalArgumentException i)
-		{
+		catch (IllegalArgumentException i) {
 			System.out.println(i.getMessage());
 		}
 		
-		if (argsInit == true)
-		{
+		if (argsInit == true) {
 			port = Integer.parseInt(args[0]);
 			directory = args[1];
 			
 			logFile = new File(directory + "/logs" + port + ".txt");
 			logger = null;
-			try
-			{
+			try {
 				logger = new PrintWriter(logFile);
 			}
-			catch (FileNotFoundException e)
-			{
-				System.out.println("Error: Log file could not be created at the specified directory.");
+			catch (FileNotFoundException e) {
+				System.out.println(new Date() + " " + "<ERROR>: Log file could not be created at the specified directory.");
 			}
 			
 			ServerSocket listener = new ServerSocket(port);
-			System.out.println("Server initialized on port " + port);
+			System.out.println(new Date() + " " + "<SERVER>: Server initialized on port " + port + ".");
 			
-			try
-			{
-				while (true)
-				{
+			try {
+				while (true) {
 					new User(listener.accept()).start();
 				}
 			}
-			finally
-			{
+			finally {
 				listener.close();
-				System.out.println("Server has been closed.");
+				System.out.println(new Date() + " " + "<SERVER>: Server has been closed.");
 			}
 		}
 	}
@@ -106,6 +97,7 @@ public class SecureChatServer
 	{
 		private Socket socket;
 		private String nickname;
+		private boolean nicknameSet;
 		private byte[] data;
 		private byte[] input;
 		private TypeOfData type;
@@ -115,61 +107,137 @@ public class SecureChatServer
 		 * @param mySocket
 		 */
 				
-		public User (Socket mySocket){this.socket = mySocket;}
+		public User(Socket mySocket){this.socket = mySocket;}
+		
+		/**
+		 * A getter method for the user's nickname. If a nickname for a user is not received by the server, the default nickname is "no_nickname".
+		 * @return nickname
+		 */
+		public String getNickname(){return nickname;}
 
 		/**
 		 * Begins a new thread for a user. Continually looks for new messages from the user, then sends them out to all other users currently connected.
 		 * Upon user disconnect, removes the user from the connected users list and closes the user's socket.
 		 */
-		public void run()
-		{
-			try
-			{
+		public void run() {
+			nicknameSet = false;
+			nickname = "no_nickname";
+			try {
 				users.add(this);
 				logger.println("(nickname) joined the server.");
-				while (true)
-				{
-					try
-					{
-						type = TypeOfData.values()[socket.getInputStream().read()];
-						if (type.ordinal() == -1)
+				while (true) {
+					try {
+						int temp = socket.getInputStream().read();
+						if (temp == -1)
 							throw new SocketException("Socket has died. RIP");
+						type = TypeOfData.values()[temp];
 						input = new byte[1000];
 						data = new byte[socket.getInputStream().read(input)];
-						
 					
-						logger.print(new Date() + " ");
-						for (int i = 0; i < data.length; i++) 
-						{
+						for (int i = 0; i < data.length; i++) {
 							if (input[i] == -1)
 								throw new SocketException("Socket has died. RIP");
 							data[i] = input[i];
 						}
 						
-						System.out.print("(user) sent a message.");
-						for (User u : users) 
-						{
-							u.send(data, type);
+						switch (type) {
+							case MESSAGE: 
+								System.out.println(new Date() + " " + "<" + nickname + ">: (message)");
+								logger.println("<" + nickname + ">: (message)");
+								for (User u : users) {
+									try {
+										u.send((nickname).getBytes("UTF-8"), TypeOfData.NICKNAME);
+									}
+									catch (UnsupportedEncodingException e) {
+										e.printStackTrace();
+									}
+									u.send(data, TypeOfData.MESSAGE);
+								}
+								break;
+								
+							case DH_PUB_KEY: 
+								System.out.println("<SERVER>: " + nickname + " issued a public key request.");
+								//TODO implement SecureConnection
+								break;
+								
+							case NICKNAME: 
+								if (nicknameSet == false) {
+									if (verifyNickname(new String(data))) {
+										nickname = new String(data);
+										System.out.println(new Date() + " " + "<SERVER>: " + nickname + " joined the server.");
+										logger.println(new Date() + " " + "<SERVER>: " + nickname + " joined the server.");
+										try {
+											this.send((nickname + " joined the server.").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+										}
+										catch (UnsupportedEncodingException u) {
+											u.printStackTrace();
+										}
+										nicknameSet = true;
+									}
+									else {
+										try {
+											this.send("INVALID_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+										}
+										catch (UnsupportedEncodingException u) {
+											u.printStackTrace();
+										}
+									}
+								}
+								else {
+									if (verifyNickname(new String(data))) {
+										System.out.print(new Date() + " " + "<SERVER>: " + nickname);
+										logger.print(new Date() + " " + "<SERVER>: " + nickname);
+										try {
+											this.send((nickname + " updated their nickname to " + new String (data) + ".").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+										}
+										catch (UnsupportedEncodingException u) {
+											u.printStackTrace();
+										}
+										nickname = new String(data);
+										System.out.println(" updated their nickname to " + nickname + ".");
+										logger.println(" updated their nickname to " + nickname + ".");
+									}
+									else {
+										try {
+											this.send("INVALID_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+										}
+										catch (UnsupportedEncodingException u) {
+											u.printStackTrace();
+										}
+									}
+								}
+								break;
+								
+							default: throw new IOException(new Date() + " " + "<ERROR>: The server received a malformed message.");
 						}
 						
 						logger.println(); 
 					}
-					catch (Exception i)
-					{
-						break;
+					catch (Exception i) {
+						if (i instanceof SocketException) {
+							users.remove(this);
+							System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server (socket lost connection).");
+							logger.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server (socket lost connection).");
+							try {
+								socket.close();
+							}
+							catch (IOException e) {
+								System.out.println(e.getMessage());
+							}		
+						}
+						else i.printStackTrace();
+						return;
 					}	
 				}
 			}
-			finally
-			{
+			finally {
 				users.remove(this);
-				logger.println("nickname disconnected from the server.");
-				try
-				{
+				System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
+				logger.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
+				try {
 					socket.close();
 				}
-				catch (IOException i)
-				{
+				catch (IOException i) {
 					System.out.println(i.getMessage());
 				}
 			}
@@ -183,14 +251,27 @@ public class SecureChatServer
 		 * @param type
 		 * @throws Exception
 		 */
-		public void send(byte[] data, TypeOfData type) throws Exception 
-		{
+		public void send(byte[] data, TypeOfData type) throws Exception {
 	        if (data.length > 1000)
-	        	throw new Exception("Error: message was too long to be sent.");
+	        	throw new Exception(new Date() + " " + "<ERROR>: message was too long to be sent.");
 
 	        this.socket.getOutputStream().write(type.ordinal());
 	        this.socket.getOutputStream().write(data);
 	        this.socket.getOutputStream().flush();
+		}
+		
+		/**
+		 * A helper method to verify that a user's submitted nickname is not a reserved nickname or is not currently being used by another user.
+		 * @param nickname
+		 */
+		public boolean verifyNickname(String nickname) {
+			for (User u : users) {
+				if (nickname.equals(u.getNickname()))
+					return false;
+			}
+			if (nickname.equalsIgnoreCase("SERVER") || nickname.equalsIgnoreCase("ERROR"))
+				return false;
+			else return true;
 		}
 	}
 }
