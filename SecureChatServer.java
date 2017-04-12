@@ -1,12 +1,18 @@
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Scanner;
 
-import java.io.File;
-import java.io.PrintWriter;
-import java.io.FileNotFoundException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.util.logging.FileHandler;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Formatter;
+import java.util.logging.SimpleFormatter;
+import java.util.logging.XMLFormatter;
+
 import java.io.UnsupportedEncodingException;
 import java.io.IOException;
-import java.io.PrintWriter;
 
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -27,15 +33,15 @@ enum TypeOfData {
  * 
  * @author David Arena
  */
-public class SecureChatServer extends Thread {
+public class SecureChatServer {
 	private static ArrayList<User> users = new ArrayList<User>();
 	private static int port;
 	private static String directory;
+	private static final Logger logger = Logger.getLogger(SecureChatServer.class.getName());
+	
 	/**
 	 * LOGGING IS GETTING A HUGE OVERHAUL: LOGGING CURRENTLY HAS ISSUES AND IS NOT TOP PRIORITY
 	 */
-	private static File logFile;
-	private static PrintWriter logger;
 	
 	/**
 	 * The main method used to initialize a server on the desired port. A directory to which logs are sent is also specified.
@@ -50,12 +56,20 @@ public class SecureChatServer extends Thread {
 		 */
 		args = new String[2];
 		args[0] = "6800";
-		args[1] = "C:\\Users\\David\\Documents"; //please change this in your implementation
+		args[1] = "./logs.log"; //please change this in your implementation
 		
 		boolean argsInit = false;
+		boolean alive = true;
+		Scanner input = new Scanner(System.in);
+		Handler fileHandler = null;
+		
+		String in;
+		
 		try {
-			if (args.length != 2)
+			if (args.length != 2) {
+				logger.severe("ERROR: The IP address and chat log directory must be specified");
 				throw new IllegalArgumentException(new Date() + " " + "<ERROR>: The IP address and chat log directory must be specified in the command line.");
+			}
 			else argsInit = true;
 		}
 		catch (IllegalArgumentException i) {
@@ -66,18 +80,10 @@ public class SecureChatServer extends Thread {
 			port = Integer.parseInt(args[0]);
 			directory = args[1];
 			
-			logFile = new File(directory + "/logs" + port + ".txt");
-			try {
-				logger = new PrintWriter(logFile);
-			}
-			catch (FileNotFoundException e) {
-				System.out.println(new Date() + " " + "<ERROR>: Log file could not be created at the specified directory.");
-			}
-			
 			try {
 				ServerSocket listener = new ServerSocket(port);
 				System.out.println(new Date() + " " + "<SERVER>: Server initialized on port " + port + ".");
-				
+				logger.info("Server initialized on port " + port + ".");
 				try {
 					while (true) {
 						new User(listener.accept()).start();
@@ -86,10 +92,12 @@ public class SecureChatServer extends Thread {
 				finally {
 					listener.close();
 					System.out.println(new Date() + " " + "<SERVER>: Server has been closed.");
+					logger.info("Server has been closed.");
 				}
 			}
 			catch (BindException b) {
 				System.out.println(new Date() + " " + "<ERROR>: There is already a service that is using the specified port.");
+				logger.severe("ERROR: There is already a service that is using the specified port.");
 			}
 		}
 	}
@@ -133,34 +141,43 @@ public class SecureChatServer extends Thread {
 			alive = true;
 			try {
 				users.add(this);
-				logger.println("(nickname) joined the server.");
 				while (true) {
 					try {
 						int temp = socket.getInputStream().read();
-						if (temp == -1)
+						if (temp < 0)
 							throw new SocketException("Socket has died. RIP");
 						type = TypeOfData.values()[temp];
 						input = new byte[1000];
 						data = new byte[socket.getInputStream().read(input)];
 					
 						for (int i = 0; i < data.length; i++) {
-							if (input[i] == -1)
+							if (input[i] < 0)
 								throw new SocketException("Socket has died. RIP");
 							data[i] = input[i];
 						}
 						
 						switch (type) {
 							case MESSAGE: 
-								System.out.println(new Date() + " " + "<" + nickname + ">: (message)");
-								logger.println("<" + nickname + ">: (message)");
-								for (User u : users) {
+								if (nicknameSet) {
+									System.out.println(new Date() + " " + "<" + nickname + ">: (message)");
+									data = secureCon.decrypt(data);
+									for (User u : users) {
+										try {
+											u.send(u.secureCon.encrypt((nickname + ',' + new String(data, "UTF-8")).getBytes("UTF-8")), TypeOfData.MESSAGE);
+										}
+										catch (UnsupportedEncodingException e) {
+											e.printStackTrace();
+										}
+										u.send(u.secureCon.encrypt(data), TypeOfData.MESSAGE);
+									}
+								}
+								else {
 									try {
-										u.send((nickname).getBytes("UTF-8"), TypeOfData.NICKNAME);
+										this.send("NO_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
 									}
-									catch (UnsupportedEncodingException e) {
-										e.printStackTrace();
+									catch (UnsupportedEncodingException u) {
+										u.printStackTrace();
 									}
-									u.send(data, TypeOfData.MESSAGE);
 								}
 								break;
 								
@@ -172,11 +189,10 @@ public class SecureChatServer extends Thread {
 								break;
 								
 							case NICKNAME: 
-								if (nicknameSet == false) {
+								if (!nicknameSet) {
 									if (verifyNickname(new String(data))) {
 										nickname = new String(data);
 										System.out.println(new Date() + " " + "<SERVER>: " + nickname + " joined the server.");
-										logger.println(new Date() + " " + "<SERVER>: " + nickname + " joined the server.");
 										try {
 											for (User u : users) {
 												u.send((nickname + " joined the server.").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
@@ -199,7 +215,6 @@ public class SecureChatServer extends Thread {
 								else {
 									if (verifyNickname(new String(data))) {
 										System.out.print(new Date() + " " + "<SERVER>: " + nickname);
-										logger.print(new Date() + " " + "<SERVER>: " + nickname);
 										try {
 											for (User u : users) {
 												u.send((nickname + " updated their nickname to " + new String (data) + ".").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
@@ -210,7 +225,6 @@ public class SecureChatServer extends Thread {
 										}
 										nickname = new String(data);
 										System.out.println(" updated their nickname to " + nickname + ".");
-										logger.println(" updated their nickname to " + nickname + ".");
 									}
 									else {
 										try {
@@ -225,15 +239,12 @@ public class SecureChatServer extends Thread {
 								
 							default: throw new IOException(new Date() + " " + "<ERROR>: The server received a malformed message.");
 						}
-						
-						logger.println(); 
 					}
 					catch (Exception i) {
 						if (i instanceof SocketException) {
 							this.alive = false;
 							users.remove(this);
-							System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server (socket lost connection).");
-							logger.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server (socket lost connection).");
+							System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
 							try {
 								socket.close();
 							}
@@ -250,7 +261,6 @@ public class SecureChatServer extends Thread {
 				if (alive) {
 					users.remove(this);
 					System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
-					logger.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
 					try {
 						socket.close();
 					}
@@ -287,7 +297,7 @@ public class SecureChatServer extends Thread {
 				if (nickname.equals(u.getNickname()))
 					return false;
 			}
-			if (nickname.equalsIgnoreCase("SERVER") || nickname.equalsIgnoreCase("ERROR"))
+			if (nickname.equalsIgnoreCase("SERVER") || nickname.equalsIgnoreCase("ERROR") || nickname.equals(""))
 				return false;
 			else return true;
 		}
