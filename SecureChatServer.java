@@ -1,16 +1,12 @@
 import java.util.ArrayList;
-import java.util.Date;
-import java.util.Scanner;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.Handler;
 import java.util.logging.FileHandler;
-import java.util.logging.ConsoleHandler;
 import java.util.logging.Formatter;
 import java.util.logging.SimpleFormatter;
 import java.util.logging.XMLFormatter;
-
 import java.io.UnsupportedEncodingException;
 import java.io.IOException;
 
@@ -37,11 +33,8 @@ public class SecureChatServer {
 	private static ArrayList<User> users = new ArrayList<User>();
 	private static int port;
 	private static String directory;
+	private static String title;
 	private static final Logger logger = Logger.getLogger(SecureChatServer.class.getName());
-	
-	/**
-	 * LOGGING IS GETTING A HUGE OVERHAUL: LOGGING CURRENTLY HAS ISSUES AND IS NOT TOP PRIORITY
-	 */
 	
 	/**
 	 * The main method used to initialize a server on the desired port. A directory to which logs are sent is also specified.
@@ -54,21 +47,20 @@ public class SecureChatServer {
 		/**
 		 * Temporary arguments so the program does not need to be run from the command line
 		 */
-		args = new String[2];
+		args = new String[3];
 		args[0] = "6800";
-		args[1] = "./logs.log"; //please change this in your implementation
-		
+		args[1] = "C:/Users/David/Documents/logger"; //please change this in your implementation
+		args[2] = "Test SecureChatServer";		
 		boolean argsInit = false;
-		boolean alive = true;
-		Scanner input = new Scanner(System.in);
-		Handler fileHandler = null;
-		
-		String in;
+		Handler txtFileHandler = null;
+		Handler xmlFileHandler = null;
+		Formatter txtFormatter = new SimpleFormatter();
+		Formatter xmlFormatter = new XMLFormatter();
 		
 		try {
-			if (args.length != 2) {
-				logger.severe("ERROR: The IP address and chat log directory must be specified");
-				throw new IllegalArgumentException(new Date() + " " + "<ERROR>: The IP address and chat log directory must be specified in the command line.");
+			if (args.length != 3) {
+				logger.severe("Port and log directory were not specified.");
+				throw new IllegalArgumentException("bad_args");
 			}
 			else argsInit = true;
 		}
@@ -76,28 +68,50 @@ public class SecureChatServer {
 			System.out.println(i.getMessage());
 		}
 		
+		try {
+			txtFileHandler = new FileHandler(args[1]);
+			txtFileHandler.setFormatter(txtFormatter);
+			xmlFileHandler = new FileHandler(args[1] + ".xml");
+			xmlFileHandler.setFormatter(xmlFormatter);
+			
+			logger.addHandler(txtFileHandler);
+			logger.addHandler(xmlFileHandler);
+			
+			txtFileHandler.setLevel(Level.ALL);
+			xmlFileHandler.setLevel(Level.ALL);
+			logger.setLevel(Level.ALL);
+			
+			logger.config("Loggers successfully configured.");
+		}
+		catch (IOException i) {
+			logger.log(Level.SEVERE, "An IOException occurred while creating the FileHandler: ", i);
+		}
+		
+		
 		if (argsInit == true) {
 			port = Integer.parseInt(args[0]);
 			directory = args[1];
+			title = args[2];
 			
 			try {
 				ServerSocket listener = new ServerSocket(port);
-				System.out.println(new Date() + " " + "<SERVER>: Server initialized on port " + port + ".");
 				logger.info("Server initialized on port " + port + ".");
 				try {
 					while (true) {
 						new User(listener.accept()).start();
+						logger.fine("Server accepted a socket.");
 					}
+				}
+				catch (Exception e) {
+					logger.log(Level.SEVERE, "An exception of type " + e.getClass().toString() + " was encountered in a user thread: ", e);
 				}
 				finally {
 					listener.close();
-					System.out.println(new Date() + " " + "<SERVER>: Server has been closed.");
 					logger.info("Server has been closed.");
 				}
 			}
 			catch (BindException b) {
-				System.out.println(new Date() + " " + "<ERROR>: There is already a service that is using the specified port.");
-				logger.severe("ERROR: There is already a service that is using the specified port.");
+				logger.severe("Couldn't create the server, another service is using the specified port. (" + port + ")");
 			}
 		}
 	}
@@ -111,11 +125,15 @@ public class SecureChatServer {
 		private SecureConnection secureCon = new SecureConnection();
 		private Socket socket;
 		private String nickname;
+		private static final Logger logger = Logger.getLogger(SecureChatServer.class.getName());
+		
 		private boolean alive;
 		private boolean nicknameSet;
+		
 		private byte[] data;
 		private byte[] input;
 		private byte[] pubKey;
+		
 		private TypeOfData type;
 		
 		/**
@@ -141,32 +159,45 @@ public class SecureChatServer {
 			alive = true;
 			try {
 				users.add(this);
+				try {
+					this.send(("TITLE" + title).getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+					logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
+				}
+				catch (Exception e){
+					if (e instanceof UnsupportedEncodingException)
+						logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8 when sending title.");
+					else logger.log(Level.SEVERE, "An exception of type " + e.getClass().toString() + " occurred in the user handler for user " + nickname, e);
+				}
 				while (true) {
 					try {
 						int temp = socket.getInputStream().read();
-						if (temp < 0)
-							throw new SocketException("Socket has died. RIP");
+						if (temp < 0) {
+							logger.fine("InputStream read error on user " + nickname);
+							throw new SocketException("Invalid read on user's socket.");
+						}
 						type = TypeOfData.values()[temp];
 						input = new byte[1000];
 						data = new byte[socket.getInputStream().read(input)];
 					
 						for (int i = 0; i < data.length; i++) {
-							if (input[i] < 0)
-								throw new SocketException("Socket has died. RIP");
+							if (input[i] < 0) {
+								logger.fine("InputStream read error on user " + nickname);
+								throw new SocketException("Invalid read on user's socket");
+							}
 							data[i] = input[i];
 						}
 						
 						switch (type) {
 							case MESSAGE: 
 								if (nicknameSet) {
-									System.out.println(new Date() + " " + "<" + nickname + ">: (message)");
+									logger.info("Message received from user " + nickname + ".");
 									data = secureCon.decrypt(data);
 									for (User u : users) {
 										try {
 											u.send(u.secureCon.encrypt((nickname + ',' + new String(data, "UTF-8")).getBytes("UTF-8")), TypeOfData.MESSAGE);
 										}
 										catch (UnsupportedEncodingException e) {
-											e.printStackTrace();
+											logger.warning("UnsupportedEncodingException occurred when converting between byte[] and String using UTF-8.");
 										}
 										u.send(u.secureCon.encrypt(data), TypeOfData.MESSAGE);
 									}
@@ -174,85 +205,104 @@ public class SecureChatServer {
 								else {
 									try {
 										this.send("NO_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
+										logger.warning("User with no nickname attempted to send a message.");
 									}
 									catch (UnsupportedEncodingException u) {
-										u.printStackTrace();
+										logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
 									}
 								}
 								break;
 								
 							case DH_PUB_KEY: 
-								System.out.println("<SERVER>: " + nickname + " issued a public key request.");
-								pubKey = secureCon.getPublicKey(data);
-								this.send(pubKey, TypeOfData.DH_PUB_KEY);
-								secureCon.processOtherPubKey(data);
+								if (nicknameSet) {
+									logger.fine("User " + nickname + " issued a public key request.");
+									pubKey = secureCon.getPublicKey(data);
+									this.send(pubKey, TypeOfData.DH_PUB_KEY);
+									secureCon.processOtherPubKey(data);
+								}
+								else {
+									logger.warning("Unnamed user attempted to issue a public key request.");
+								}
 								break;
 								
 							case NICKNAME: 
 								if (!nicknameSet) {
 									if (verifyNickname(new String(data))) {
 										nickname = new String(data);
-										System.out.println(new Date() + " " + "<SERVER>: " + nickname + " joined the server.");
+										logger.info("User " + nickname + " joined the server.");
 										try {
 											for (User u : users) {
 												u.send((nickname + " joined the server.").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
 											}
 										}
 										catch (UnsupportedEncodingException u) {
-											u.printStackTrace();
+											logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
 										}
 										nicknameSet = true;
 									}
 									else {
 										try {
+											logger.fine("Unnamed user attempted to set invalid nickname.");
 											this.send("INVALID_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
 										}
 										catch (UnsupportedEncodingException u) {
-											u.printStackTrace();
+											logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
 										}
 									}
 								}
 								else {
 									if (verifyNickname(new String(data))) {
-										System.out.print(new Date() + " " + "<SERVER>: " + nickname);
+										logger.fine("User " + nickname + " updated their nickname to " + new String(data) + ".");
 										try {
 											for (User u : users) {
 												u.send((nickname + " updated their nickname to " + new String (data) + ".").getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
 											}
 										}
 										catch (UnsupportedEncodingException u) {
-											u.printStackTrace();
+											logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
 										}
+										logger.info("User " + nickname + " updated their nickname to " + new String(data) + ".");
 										nickname = new String(data);
-										System.out.println(" updated their nickname to " + nickname + ".");
 									}
 									else {
 										try {
+											logger.fine(nickname + " attempted to change their nickname to an invalid nickname.");
 											this.send("INVALID_NICKNAME".getBytes("UTF-8"), TypeOfData.SERVER_MESSAGE);
 										}
 										catch (UnsupportedEncodingException u) {
-											u.printStackTrace();
+											logger.warning("UnsupportedEncodingException occurred when converting String to byte[] using UTF-8.");
 										}
 									}
 								}
 								break;
 								
-							default: throw new IOException(new Date() + " " + "<ERROR>: The server received a malformed message.");
+							default: logger.warning("The server received a malformed message.");
 						}
 					}
 					catch (Exception i) {
 						if (i instanceof SocketException) {
 							this.alive = false;
 							users.remove(this);
-							System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
-							try {
-								socket.close();
+							if (nicknameSet) {
+								logger.info("User " + nickname + " disconnected from the server.");
+								try {
+									socket.close();
+								}
+								catch (IOException e) {
+									logger.severe("IOException occurred when attempting to close the socket of user " + nickname);
+								}	
 							}
-							catch (IOException e) {
-								System.out.println(e.getMessage());
-							}		
+							else {
+								logger.info("Unnamed user disconnected from the server.");
+								try {
+									socket.close();
+								}
+								catch (IOException e) {
+									logger.severe("IOException occurred when attempting to close the socket of unnamed user.");
+								}	
+							}
 						}
-						else i.printStackTrace();
+						else logger.log(Level.SEVERE, "An exception of type " + i.getClass().toString() + " occurred in the user handler for user " + nickname, i);
 						return;
 					}	
 				}
@@ -260,12 +310,23 @@ public class SecureChatServer {
 			finally {
 				if (alive) {
 					users.remove(this);
-					System.out.println(new Date() + " " + "<SERVER>: " + nickname + " disconnected from the server.");
-					try {
-						socket.close();
+					if (nicknameSet) {
+						logger.info("User " + nickname + " disconnected from the server.");
+						try {
+							socket.close();
+						}
+						catch (IOException e) {
+							logger.severe("IOException occurred when attempting to close the socket of user " + nickname);
+						}	
 					}
-					catch (IOException i) {
-						System.out.println(i.getMessage());
+					else {
+						logger.info("Unnamed user disconnected from the server.");
+						try {
+							socket.close();
+						}
+						catch (IOException e) {
+							logger.severe("IOException occurred when attempting to close the socket of unnamed user.");
+						}	
 					}
 				}
 			}
@@ -280,12 +341,19 @@ public class SecureChatServer {
 		 * @throws Exception
 		 */
 		public void send(byte[] data, TypeOfData type) throws Exception {
-	        if (data.length > 1000)
-	        	throw new Exception(new Date() + " " + "<ERROR>: message was too long to be sent.");
+	        if (data.length > 1000) {
+	        	logger.fine("Attempted to send a message larger than the buffer.");
+	        	throw new Exception("Message was too long to be sent.");
+	        }
 
-	        this.socket.getOutputStream().write(type.ordinal());
-	        this.socket.getOutputStream().write(data);
-	        this.socket.getOutputStream().flush();
+	        try {
+		        this.socket.getOutputStream().write(type.ordinal());
+		        this.socket.getOutputStream().write(data);
+		        this.socket.getOutputStream().flush();
+	        }
+	        catch (IOException i) {
+	        	logger.severe("An IOException occurred while writing bytes to the user's socket.");
+	        }
 		}
 		
 		/**
