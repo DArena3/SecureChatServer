@@ -1,2 +1,2 @@
 # SecureChatServer
-When run from the command line, creates a SecureChatServer on the specified port and log directory. It is very minimal; in its current state, it receives messages as byte[]s and broadcasts them to all users. More features to be added.
+Creates a SecureChatServer on the specified port and log directory. In its current state, it receives messages as byte[]s preceded with an enum that indicates the type of data. The server can currently handle nicknames, SecureConnection requests, and regular messages. The server also creates log files, both regular txt and XML-formatted.
